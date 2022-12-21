@@ -2,31 +2,25 @@
 """
 @author: John Ribis
 """
-from ctypes import resize
-import time, sys, os, math, pickle
+import time, os, pickle
 import cv2
 from skimage.registration import phase_cross_correlation
-from skimage.filters import threshold_otsu, median, threshold_local, threshold_isodata
+from skimage.filters import threshold_otsu, median
 import skimage.morphology as morph
 from skimage.segmentation import clear_border
 from skimage import exposure
 import numpy as np
-import matplotlib.pyplot as plt
-from PIL import Image, ImageFont, ImageDraw
 import tqdm
-from skimage.measure import label, regionprops, regionprops_table
-from skimage.color import label2rgb
-from scipy.interpolate import PchipInterpolator 
-import multiprocessing as mp
+from skimage.measure import label, regionprops_table
 import pandas as pd
-import seaborn as sns
 from skimage.io import MultiImage
 from multiprocessing import Pool
 from joblib import Parallel, delayed, cpu_count
+import plotly.express as px
 
 
 class Pipeline:
-    def __init__(self, paths, threshold, samp_interval = 1, exp_data = None, batch = False, masks = False, single = False, align = True):
+    def __init__(self, paths, threshold, samp_interval=1, exp_data=None, batch=False, masks=False, single=False, align=True):
         self.paths = paths
         self.threshold = threshold
         self.samp_interval = samp_interval
@@ -36,13 +30,14 @@ class Pipeline:
         self.single = single
         self.exp_data = exp_data
         self.align = align
-     
+
     def process(self):
         if self.batch is True and self.exp_data is not None:
             for self.path, self.img_name in zip(self.paths, self.exp_data):
                 name = self.img_name#list(self.img_name)[0]
                 self.strain = self.exp_data[name]['strain']
                 self.replicate = self.exp_data[name]['replicate']
+                self.condition = self.exp_data[name]['condition']
                 self.position = self.exp_data[name]['position']
                 self.run_pipeline(paths = self.path, threshold = self.threshold)
 
@@ -50,25 +45,33 @@ class Pipeline:
             name = list(self.exp_data.keys())[0]
             self.strain = self.exp_data[name]['strain']
             self.replicate = self.exp_data[name]['replicate']
+            self.condition = self.exp_data[name]['condition']
             self.position = self.exp_data[name]['position']            
             self.path = self.paths
             self.run_pipeline(threshold = self.threshold)
 
     def run_pipeline(self, paths = None, threshold = 0.05):
         if self.single is False and self.align is True:
+            start = time.time()
+            imgs = self.load_images()
             self.register_stack()
             self.segment_spores()
             self.track_spores()
             self.extract_features()
             self.save_data()
+            end = time.time()
+            print(end - start)
         
-        elif self.single is False and self.align is False: #Can remove timings from this, eventually
+        elif self.single is False and self.align is False:
+            start = time.time()
             print('skipping registration')
             imgs = self.load_images()
             self.segment_spores(img = imgs)
             self.track_spores()
             self.extract_features(images = imgs)
             self.save_data()
+            end = time.time()
+            print(end - start)
 
         else:
             img = self.load_images()
@@ -76,22 +79,27 @@ class Pipeline:
             self.extract_features()
         
     def load_images(self, img_path = None):
+        '''Loads images as a list of 3D numpy stacks.
+        Parameters: img_path: path(s) to .tif stack. Keep as none unless using as standalone method.
+        Returns: 3d numpy array of images '''
         if img_path is not None:
             img_path = img_path
         else:
             img_path = self.path
-        #had to change this from openCV imreadmulti. Still using cv2.imshow function for speed. Returns a 3d numpy array of all images in stack.
+
+        #Returns a 3d numpy array of all images in stack.
         imgs = MultiImage(img_path)[0]
         return imgs
+    
 
     def register_stack(self, img_path = None):
-        '''  
+        ''' 
             Parameters
             ----------
-            movie_dir : str containg path to .tif stack
-                Function aligns movie frames using phase cross-correlation. Function 
-                will likely work pretty well with any other time-lapse xy drift.
-                THIS IS REALLY ONLY NEEDED WHEN THERE ARE BIG POSITIONAL MOVEMENTS FRAME TO FRAME. THE TRACKING IS FAIRLY ROBUST
+            img_path : (string) path to .tif stack
+                Function aligns movie frames using phase cross-correlation. 
+                THIS IS REALLY ONLY NEEDED WHEN THERE ARE BIG POSITIONAL MOVEMENTS FRAME TO FRAME. 
+                THE TRACKING IS FAIRLY ROBUST TO DRIFT.
 
             Returns
             -------
@@ -174,14 +182,16 @@ class Pipeline:
 
     
     def preprocess_image(self,img):
-        """ Takes image and apply median filter and equalizes histogram """
+        """Inputs: single image
+           Returns: black-hat, median filtered, histogram equalized image
+           Description:"""
         # Denoise image with median filter
         denoised = median(img, morph.selem.disk(2))
 
         # Equalize image histogram to improve contrast
         eq = exposure.equalize_adapthist(denoised)
 
-        # apply top-hat transform to image. Need to use a large structuring element
+        # apply top-hat transform to image. Need to use a fairly large structuring element for spore coat
         strel = morph.selem.disk(10)
         #openCV top-hat is considerably faster than scikit
         self.top_hat = cv2.morphologyEx(eq, cv2.MORPH_BLACKHAT, strel)
@@ -191,7 +201,7 @@ class Pipeline:
 
     def get_mask(self, autothresh = False, strel_size = 8):
 
-        # Do histogram based auto-thresholding (didnt always work well for images after top-hat)
+        # Can do histogram based auto-thresholding (didnt always work well for images after top-hat)
         if autothresh is True:
             self.threshold = threshold_otsu(self.top_hat)
         else:
@@ -212,6 +222,9 @@ class Pipeline:
 
     
     def segment_spores(self, img = None, single = False, threshold = None):
+
+        '''Method runs segmentation procedure on phase image'''
+
         print('Segmenting Spores...')
         #can pass in any image to segment by calling this method. Otherwise will default to the 'self' registered stack.
         if img is not None:
@@ -237,12 +250,11 @@ class Pipeline:
             self.labeled_mask = label(mask).astype('int32')
 
         else:
-            #change this to autoselect the best number of cpu cores
-            
-            #Huge speed increase with joblib. Detects user cpus cores to distribute segmentation jobs.
-            masks = Parallel(n_jobs= 6)(delayed(self.seg)(img[i,:,:]) for i in tqdm.tqdm(range(len(img))))
-            self.labeled_mask = np.array(masks)
 
+            #Huge speed increase with joblib. Detects user cpus cores -1 to distribute segmentation jobs.
+            masks = Parallel(n_jobs= -2)(delayed(self.seg)(img[i,:,:]) for i in tqdm.tqdm(range(len(img))))
+            self.labeled_mask = np.array(masks)
+        
         return self.labeled_mask
 
     def seg(self, img):
@@ -254,12 +266,12 @@ class Pipeline:
 
         # label mask
         labels = label(mask).astype('int32')
-        
+
         return labels
 
     def link_pixels(self, refrence_mask, target_mask):
 
-        # initialize matrix of zeros to populate with new labels
+        # initialize empty mask of zeros to populate with new labels
         corrected_mask = np.zeros(np.shape(refrence_mask)).astype('int32')
         
         #find the unique labels in the ref im
@@ -283,12 +295,14 @@ class Pipeline:
             else:
                 m2 = target_mask == L2
             
-            #if the overlapping label doesn't correspond then
+            #if the overlapping label doesn't correspond then fix it.
             corrected_mask[m2] = L1
 
         return corrected_mask
 
     def track_spores(self):
+        """
+        Returns: 3d matrix (stack) of labeled masks with corrected IDs."""
         self.new_labs = np.zeros(np.shape(self.labeled_mask)).astype('int32')
         print('Tracking and Correcting IDs...')
         #algorithm compares labels based on location in the first image in the stack to the next, then uses the corrected image as a refrence for the rest.
@@ -300,10 +314,10 @@ class Pipeline:
                 if i == 0:
                     refrence_mask = self.labeled_mask[i,:,:]
                 else:
-                    refrence_mask = self.new_labs[i - 1,:,:]
+                    refrence_mask = self.new_labs[i-1,:,:]
                 
                 #define target mask
-                target_mask = self.labeled_mask[i + 1,:,:]
+                target_mask = self.labeled_mask[i+1,:,:]
                 
                 #Run function to spit out corrected mask
                 corrected = self.link_pixels(refrence_mask, target_mask)
@@ -314,13 +328,11 @@ class Pipeline:
         print('Tracking Finished')    
         return self.new_labs
     
-    def label_input_masks():
-        pass
 
     def extract_features(self,label_stack = None, images = None):
-    #add functionality to do fluorescence measurements as well, Need to pass intensity image as a list of registered image arrays.
+    #add functionality to do fluorescence measurements as well, Need to pass intensity image as a list of registered/unregistered image arrays.
     #initialize list for features dataframes.
-    #HAVE DIALOG POPUP TO ALLOW USER TO ADD RELEVANT EXPERIMENTAL DATA (STRAIN, REPLICATE, POSITION)
+        
         feats = []
 
         if images is not None:
@@ -356,9 +368,10 @@ class Pipeline:
         
         self.features = pd.concat(feat,axis = 0)
         num_cells = len(self.features)
-        #add in experiment data
+        #add experiment data to dataframe
         self.features.insert(0, 'Position', [self.position] * num_cells)
         self.features.insert(0, 'Replicate', [self.replicate] * num_cells)
+        self.features.insert(0, 'Condition', [self.condition] * num_cells)
         self.features.insert(0, 'Strain', [self.strain] * num_cells)
         
         #return dataframe with all features and datapoints for all spores in the movie.
@@ -383,111 +396,229 @@ class Pipeline:
         out_path = os.path.join(base,f'{name}_output.pkl')
         print(f'Output:{out_path}')
 
-        print('Saving to .csv')
+        print('Saving data to .csv')
         csv_name = os.path.join(base,f'{name}_features.csv')
         print(csv_name)                        
         self.features.to_csv(csv_name, index=False)
         #save the dictionary with all data in a pickle file
         with open(out_path, "wb") as pkl_file:
             pickle.dump(output, pkl_file)
+
  
 class DataHandling:
-    #Just data io stuff and methods to join datasets
-    def __init_(self, data_paths):
-        self.data_path = data_paths
+
+    def __init__(self, data_paths, timeint = 30, time_offset = 6.5, min_frames = 100, max_area= 300):
+        self.data_paths = data_paths
+        self.timeint = timeint
+        self.time_offset = time_offset
+        self.min_frames = min_frames
+        self.max_area = max_area
+
+    def process_data(self):
+        self.data = self.read_csv()
+        if len(self.data_paths) > 1:
+            joined = self.join_data()
+            cleaned = self.clean_data(joined)
+        else:
+            cleaned = self.clean_data(self.data)
+        return self.assign_uniqueid(cleaned)
+
 
     def read_pkl(self, pkl_file = None):
         #load .pkl file.    
         with open(pkl_file, 'r+b') as pkl_file:
             self.data = pickle.load(pkl_file)
-        return self.data
+        return self.pkldata
     
-    def read_csv(self, csv_file = None):
-        #load .csv_data
-        self.data = pd.read_csv(csv_file)
+    def read_csv(self):
+        #load .csv_data into a list of pandas dataframes or just as a single dataframe if only oone path is present.
+        if len(self.data_paths) > 1:
+            self.data = [pd.read_csv(path) for path in self.data_paths]
+        else:
+            self.data = pd.read_csv(self.data_paths[0])
         return self.data
 
     def join_data(self):
-        #method concatenates feature data extracted from a .csv or from a .pkl file
-        pass
+        #method concatenates whatever pandas dataframes are selected by user.
+        #will take a list of dataframes and concatenate them.
+        #concatentate everything into a huge dataframe.
+        joined = pd.concat(self.data)
+        joined_data = self.assign_uniqueid(joined)
+        return joined_data
+
+    def assign_uniqueid(self,df):
+        #function assigns new identifiers to all cells in dataframe. Runs slow but works. Only needs to be run on a concatenated df.
+        #initialize column in dataframe.
+        print('Assigning new IDs...')
+        df['unique_id'] = np.nan
+        groups = df.groupby(['Strain', 'Replicate', 'Position', 'Condition', 'ID'])['ID'].count()
+        df = df.set_index(['Strain', 'Replicate', 'Position', 'Condition', 'ID']).sort_index()
+        #Loop through and just assign IDs sequentially to the data
+        for i,index in enumerate(groups.index):
+            df.loc[index,'unique_id'] = int(i)
+        df.reset_index(inplace=True)
+        return df
+    
+    def clean_data(self,df):
+        #Simple function that removes shit data and assigns unique IDs for the frame to make plotting work with concatenated data.
+        #take spores that are round enough and have an area corresponding to a single spore. Max area is in pixels. Add a conversion to correct for magnification wtih area threshold.
+        #Take area at first timepoint
+        cleaned = df.loc[df['area'] < self.max_area].copy()
+        #make a column witht he absolute difference in area frame-frame (can use this to get rid of unrealistically jumpy data)
+        cleaned['area_vari'] = cleaned['area'].diff().abs()
+        #correct time and convert to minutes
+        cleaned.loc[:,'Time'] = cleaned['Time'].multiply((self.timeint/60)) + self.time_offset
+        #get rid of spores that werent tracked for long enough (can look at any variable here)
+        counts = cleaned.groupby(['Strain','Position','Replicate', 'Condition', 'ID']).count()
+        #only take spores tracked for a minimum of 100 frames then use this to generate a trimmed dataframe only with the data that we want.
+        best_tracks = counts[counts['Time']>self.min_frames].reset_index()
+        index_best = best_tracks.iloc[:,:5].copy()
+        options = ['Strain','Position','Replicate', 'Condition','ID']
+        #merge was the simplest solution to extract the best values
+        trimmed = index_best.merge(cleaned, on = options)
         
+        return trimmed
+    
+    def max_germ_rate(self, feature_key = 'mean_intensity', step = 1):
+        #run function on entire dataframe 
+        #fit pchip to get rate info
+        xdata = self.data.Time.to_numpy()
+        #fit pchip to data to get piecewise polynomials and take first derivative.
+        pchip  = PchipInterpolator(xdata, self.data[feature_key]).derivative(nu=1)
+        #create a new array of x-data (may not actually need to do this, can probably evaluate with the )
+        start = xdata[0]
+        stop = xdata[-1]
+        
+        x_new = np.arange(start, stop, step)
+
+        #Evaluate piecewise derivatives with the new x-array and take absolute minimum value to get germiantion rate
+        derivatives = abs(min(pchip(x_new)))
+        return derivatives
 
 
-   
+    def get_int_ratio(self, df):
+        #find first and last time of trace
+        t_0 = df.Time.min()
+        t_end = df.Time.max()
+
+        #get first and last intensity, indexed by time
+        int_0 = df.mean_intensity.loc[df.Time==t_0].to_numpy()
+        int_end = df.mean_intensity.loc[df.Time==t_end].to_numpy()
+
+        print(int_0, int_end)
+        
+        #Take the ratio of intensities and return as a float
+        ratio = int_0/int_end
+
+        #print(ratio)
+        
+        return ratio.astype(np.float64)[0]
+
+    def germ_time(series, feature_key='mean_intensity', timeint = 30, window_size = 4, time_offset = 6.5):
+        #Function is meant to run on a series following a groupby
+        #function finds the time to germination usign a basic sliding window algorithm
+        #Time interval between frames in seconds
+        #time offset corresponds to the amount of time passed until the acquisition was started
+        timeadj = (timeint/60) 
+
+        #convert series data as a numpy vector for speed and simplicity
+        timeseries = series[feature_key].to_numpy()
+
+        #Set pointer indices corresponding to the window size
+        pointer_start = 0
+        pointer_end = window_size - 1
+        end = len(timeseries)
+
+        diffarr = np.empty(end-window_size)
+        #run window across array taking the difference between the first and last values in the window
+        
+        while pointer_end < end:
+            p1 = timeseries[pointer_start]
+            p2 = timeseries[pointer_end]
+
+            #populate array with difference between the first and second pointer
+            diffarr[pointer_start] = p1-p2
+            
+            #Increment pointers for next iteration
+            pointer_start = pointer_end + 1
+            pointer_end = pointer_end + window_size 
+
+        #find maximum in difference array 
+        germ_time = diffarr.argmax() * timeadj + time_offset
+
+        #leaving this commented out. Just keeping in case I decide to use the difference array for some reason.
+        #output = (timepoint,timeseries[diffarr.argmax()], diff)
+        return germ_time
+
+
 
 
 class DataVis:
-    '''Class contains a series of methods to visualize germination data '''
-    def __init__(self, data):
-        self.data = data
+    '''Class contains a series of basic methods to interactivley visualize germination data with Plotly'''
     
-    def smooth_data(self, feature_key = 'mean_intensity', span = 5):
-        '''Function smooths noisy continuous data a.la. matlabs' smooth fucntion'''
-        #function to smooth noisy germination data. Function was taken from stack exchange:
-        #https://stackoverflow.com/questions/40443020/matlabs-smooth-implementation-n-point-moving-average-in-numpy-python
-        # data: pandas dataframe with data to be visualized
-        # span: smoothing window size needs, which must be odd number,
-        # as in the original MATLAB implementation
-        # Need to be able to change the span in the GUI to see what works the best for the data
-        feature_data = self.data[feature_key]
+    def __init__(self, dataframe):
+        self.data = dataframe
 
-        out0 = np.convolve(feature_data, np.ones(span,dtype=int),'valid') / span    
-        r = np.arange(1, self.span-1,2)
-        start = np.cumsum(feature_data[:self.span-1])[::2] / r
-        stop = (np.cumsum(feature_data[:-self.span:-1])[::2] / r) [::-1]
-        smoothed = np.concatenate((start , out0, stop))
-
-        #df_nat['mov_avg'] = df_nat['new_cases'].rolling(7).sum()
-        return smoothed
-
-    def fit_pchip(self, data = None, feature_key = 'mean_intensity', step = 1):
-        #fit a pchip (similar to a spline) to data. 
-        #Data tends to be noisy, so its often best to smooth the data beforehand to calculate stuff like max germination rate. 
-
-        pchip  = PchipInterpolator(self.data['Time'], self.data[feature_key])
-        #need to create a vector containing the range of values we're interested in 
-        #and feed that into the pchip functions generated by the input data.
-        start = self.data.Time[0]
-        stop = self.data.Time[-1]
+    def plot_subset(self,num_samples=1, key='mean_intensity'):
+        random_samples = self.subsetter(num_samples=num_samples)
+        return self.plot_curves(random_samples, key=key)
         
-        x_new = np.arange(start, stop, step)
-        #Evaluate fx for the values to be interpolated, and generate new interpolated data.
-        self.interp = pchip(x_new)
-        #Evaluate derivative of fx at the new values
-        self.derivatives = pchip.derivative(x_new, nu = 1)
 
-        return self.interp, self.derivatives
+    #Revise subsetter function to reflect function in newer version
+    def subsetter(self, num_samples=1):
+        #This function absolutely needs to  be sped up.
+        #find unique IDs based on group. Will need to add treatment to this if comparing treatments
+        unique = self.data.groupby(['Strain','Position','Replicate'])['ID'].apply(np.unique)
+        #loop though the multiindex to find the mutliindex and take the number of smaples desired
+        samples = [[index, np.unique(np.random.choice(sample, num_samples))] for index,sample in unique.items()]
+        #initialize empy list to concatenate dataframes at the end of the loop
+        rand_samps = []
+        #Change the dataframe to a multiindexed dataframe to use the samples as 
+        multiindexed = self.data.copy().set_index(['Strain','Position','Replicate'])
 
-    def germination_rate(self):
-        #use the derivatives output from the fit_spline method to find the maximum germination rate
+        for identifier, spore_ids in samples:
+            #get indexes in full dataframe
+            indexes = multiindexed.sort_index().loc[identifier]
+            #use those indices to return a dataframe with random values
+            output = indexes[indexes['ID'].isin(spore_ids)].reset_index()
+            #append to random sample list
+            rand_samps.append(output)
 
-        pass
-
-    def random_subset(self):
-        #method allows user to select a random subset of data to plot to avoid overplotting.
-        #Takes subset of data for each strain. If replicates are present, that number needs to be taken from each replicate.
-        pass
-
-    def plot_curves(self, data, x = 'Time', y = 'mean_intensity', grouping = 'ID'):
-        #plot lines of data using seaborn. 
-        #grouping changes the hue parameter in seaborn. 
-        #Can use any column variable. Have this work as a dropdown in pysimpleGUI
-        sns.lineplot(data = data, x = x, y = y, hue = grouping)
+        #return dataframe with subsets for everything
+        rand_samps = pd.concat(rand_samps).reset_index()
     
-    def plot_violins():
-        pass
+        return rand_samps
 
-    def plot_jitter():
-        pass
+    def sort_plot_data(self, df, order, key = 'Condition'):
+        #Function converts conditions as a categorical variable in pandas and allows us to specify a specific plotting order.
+        df[key] = df[key].astype(order)
+        df.sort_values(key, inplace=True, ascending=False)
+        return df
 
-    def plot_double_y():
-        # a = extract_features(new_labs, registered, replicate =1, strain = 'bsub', pos_number = 1, time_int = 2)
-        # sns.lineplot(x = a.Time, y = a.mean_intensity, hue = a.ID, palette = palette)
-        # ax2 = plt.twinx()
-        # sns.lineplot(x = a.Time, y = a.area, hue = a.ID,palette = palette, legend = False)
-        pass
+    def plot_curves(self, data, key):
+        labels = {'Time': 'Time (min)'}
 
-#Standalone functions
+        if 'unique_id' in data.columns:
+            color = 'unique_id'
+        else:
+            color = 'ID'
+
+        fig = px.line(data, x = 'Time', y = key, color=color, facet_row='Condition',
+                labels=labels)
+
+        fig.for_each_annotation(lambda a: a.update(text=a.text.split("=")[1]))
+        fig.update_layout(width=800, showlegend=False)
+        return fig
+
+    
+
+
+#Standalone functions--------------------------------------------------------------------------------------------------
+def save_dataframe(df, outputdir, outputname):
+            #save huge dataframe to whatever directory the user specifies.
+    output_path = os.path.join(outputdir,f'{outputname}_joined.csv')
+    df.to_csv(output_path, index=False)
+
 def test_seg(image = None, path = None, threshold = 0.05):
     #instantiate a Pipeline object and call segment spores method
    
@@ -505,7 +636,7 @@ def test_seg(image = None, path = None, threshold = 0.05):
     
     #resize the image if it's really large. Need to change this down the road to make it so that the user can just resize the window by dragging.
     if im_copy.shape[1] > 1400 or im_copy.shape[0] > 1400:
-        scale_percent = 40 # percent of original size
+        scale_percent = 60 # percent of original size
         width = int(im_copy.shape[1] * scale_percent / 100)
         height = int(im_copy.shape[0] * scale_percent / 100)
         dim = (width, height)
@@ -513,9 +644,10 @@ def test_seg(image = None, path = None, threshold = 0.05):
         cv2.imshow('Contours', resized) 
     else:  
         cv2.imshow('Contours', im_copy) 
-   
+
+    # cv2.imshow('Contours', im_copy) 
     #https://stackoverflow.com/questions/35003476/opencv-python-how-to-detect-if-a-window-is-closed/37881722#37881722
-    #Display segmentation result. Code below closes the open CV window using the 'x' 
+    #Display segmentation result. Code below closes the open CV window using the 'x'. Otherwise it will eb 
     while cv2.getWindowProperty('window-name', 0) >= 0:
         keyCode = cv2.waitKey(50)
 
@@ -524,7 +656,7 @@ def test_seg(image = None, path = None, threshold = 0.05):
 def display_image(image):
 #Trying to speed things up using openCV for image display.
     #resize the image if very large
-    if image.shape[1] > 1400 or image.shape[2] > 1400:
+    if image.shape[1] > 1400 or image.shape[0] > 1400:
         scale_percent = 40 # percent of original size
         width = int(image.shape[1] * scale_percent / 100)
         height = int(image.shape[0] * scale_percent / 100)
@@ -538,8 +670,8 @@ def display_image(image):
         keyCode = cv2.waitKey(50)
 
 def load_images(image_directory):
-    images = MultiImage(image_directory)[0]
-    return images
+    return MultiImage(image_directory)[0]
+
 def plot_runtime():
     pass
     # fig, ax = plt.subplots(figsize=(12,5))
