@@ -1,3 +1,5 @@
+'''Code to run PySpore GUIs'''
+
 
 import os
 import pandas as pd

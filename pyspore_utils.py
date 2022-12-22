@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
 """
+Code contains classes and standalone functions called by the PySpore GUI.
+There should be some modularity here for people to customize, or just use pieces
+as they see fit. Examples and functions for calculating germination rate and 
+time can be found in the jupyter notebook analyzing data for the associated manuscript
+found in the github folder.
+
 @author: John Ribis
 """
 import time, os, pickle
@@ -15,7 +21,7 @@ from skimage.measure import label, regionprops_table
 import pandas as pd
 from skimage.io import MultiImage
 from multiprocessing import Pool
-from joblib import Parallel, delayed, cpu_count
+from joblib import Parallel, delayed
 import plotly.express as px
 
 
@@ -514,44 +520,6 @@ class DataHandling:
         
         return ratio.astype(np.float64)[0]
 
-    def germ_time(series, feature_key='mean_intensity', timeint = 30, window_size = 4, time_offset = 6.5):
-        #Function is meant to run on a series following a groupby
-        #function finds the time to germination usign a basic sliding window algorithm
-        #Time interval between frames in seconds
-        #time offset corresponds to the amount of time passed until the acquisition was started
-        timeadj = (timeint/60) 
-
-        #convert series data as a numpy vector for speed and simplicity
-        timeseries = series[feature_key].to_numpy()
-
-        #Set pointer indices corresponding to the window size
-        pointer_start = 0
-        pointer_end = window_size - 1
-        end = len(timeseries)
-
-        diffarr = np.empty(end-window_size)
-        #run window across array taking the difference between the first and last values in the window
-        
-        while pointer_end < end:
-            p1 = timeseries[pointer_start]
-            p2 = timeseries[pointer_end]
-
-            #populate array with difference between the first and second pointer
-            diffarr[pointer_start] = p1-p2
-            
-            #Increment pointers for next iteration
-            pointer_start = pointer_end + 1
-            pointer_end = pointer_end + window_size 
-
-        #find maximum in difference array 
-        germ_time = diffarr.argmax() * timeadj + time_offset
-
-        #leaving this commented out. Just keeping in case I decide to use the difference array for some reason.
-        #output = (timepoint,timeseries[diffarr.argmax()], diff)
-        return germ_time
-
-
-
 
 class DataVis:
     '''Class contains a series of basic methods to interactivley visualize germination data with Plotly'''
@@ -595,7 +563,7 @@ class DataVis:
         df.sort_values(key, inplace=True, ascending=False)
         return df
 
-    def plot_curves(self, data, key):
+    def plot_curves(self, data, key, facet_row='Condition'):
         labels = {'Time': 'Time (min)'}
 
         if 'unique_id' in data.columns:
@@ -603,7 +571,7 @@ class DataVis:
         else:
             color = 'ID'
 
-        fig = px.line(data, x = 'Time', y = key, color=color, facet_row='Condition',
+        fig = px.line(data, x = 'Time', y = key, color=color, facet_row=facet_row,
                 labels=labels)
 
         fig.for_each_annotation(lambda a: a.update(text=a.text.split("=")[1]))
