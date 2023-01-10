@@ -485,22 +485,6 @@ class DataHandling:
         
         return trimmed
     
-    def max_germ_rate(self, feature_key = 'mean_intensity', step = 1):
-        #run function on entire dataframe 
-        #fit pchip to get rate info
-        xdata = self.data.Time.to_numpy()
-        #fit pchip to data to get piecewise polynomials and take first derivative.
-        pchip  = PchipInterpolator(xdata, self.data[feature_key]).derivative(nu=1)
-        #create a new array of x-data (may not actually need to do this, can probably evaluate with the )
-        start = xdata[0]
-        stop = xdata[-1]
-        
-        x_new = np.arange(start, stop, step)
-
-        #Evaluate piecewise derivatives with the new x-array and take absolute minimum value to get germiantion rate
-        derivatives = abs(min(pchip(x_new)))
-        return derivatives
-
 
     def get_int_ratio(self, df):
         #find first and last time of trace
@@ -527,9 +511,9 @@ class DataVis:
     def __init__(self, dataframe):
         self.data = dataframe
 
-    def plot_subset(self,num_samples=1, key='mean_intensity'):
+    def plot_subset(self,num_samples=1, key='mean_intensity', facet_row='Condition'):
         random_samples = self.subsetter(num_samples=num_samples)
-        return self.plot_curves(random_samples, key=key)
+        return self.plot_curves(random_samples, key=key, facet_row=facet_row)
         
 
     #Revise subsetter function to reflect function in newer version

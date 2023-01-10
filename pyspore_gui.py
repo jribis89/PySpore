@@ -166,16 +166,16 @@ display the .csv as a table.'''
 #Tooltips list
 tooltips = [
     'Use this to look at a single unprocessed dataframe, or a processed dataframe.\n If multiple dataframes are selected, they will automatically be processed according to the parameters listed below.',
-    'Cleans up data based on parameters listed below. \n If multiple datasets are selected, they will be joined together and processed.',
-    'Displays currently loaded data as a table in new window.\n Will be slow with very large datasets.',
+    'Cleans up data based on parameters listed below. \n If multiple datasets are selected and loaded, they will be joined together and processed.',
+    'Displays currently loaded data as a table in new window.\n Tends be slow with very large datasets.',
     'Time interval (in seconds) frame-frame.',
     'Delay (in mins) before movie started.',
     'Minimum number of frames spores need to be tracked.',
     'Maximum allowable spore area. \n Avoids selecting clumps.',
     'Pixel size (in μm) of image.',
-    'Plots intensity change for a random subset of spores from each position.',
-    'Number of random spores to select from each position.',
-    'Plots overlayed histograms and marginal box plots.'
+    'Plots quantified parameter from a specified number of random spores from each position.',
+    'Number of random spores to select from each position to plot.',
+    'Select the variable that you want for the plot rows. \n ex: Selecting strain will plot the single traces based on strain, so each row will be a different strain.'
 ]
 
 #Change these defaults to suit experiment
@@ -199,9 +199,9 @@ def gen_window_1():
                 [sg.Text('Min Number Frames',expand_x=True), sg.InputText(filterdefaults['minframes'], size=(5,1), key = 'minframes', tooltip=tooltips[5])], 
                 [sg.Text('Maximum Spore Area (px)', expand_x=True), sg.InputText(filterdefaults['maxarea'], size=(5,1), key = 'maxarea', tooltip=tooltips[6])],
                 [sg.Text('Pixel Size (μm)', expand_x=True), sg.InputText(filterdefaults['pixsize'], size=(5,1), key = 'pixsize', tooltip=tooltips[7])],
-                [sg.Button('Plot Random Traces', tooltip=tooltips[8]), sg.Combo(values=[], size=(15,1), visible=False, key='trace_var')], 
+                [sg.Button('Plot Random Traces', tooltip=tooltips[8]), sg.Combo(values=[], size=(15,1), visible=True, key='trace_var')],
+                [sg.Text('Plot Grouping', expand_x=True), sg.Combo(values=['Strain', 'Condition'], size=(15,1), visible=True, key='facet_row')],  
                 [sg.Text('Num Samples'), sg.InputText(1, size=(5,1), key = 'sample', tooltip=tooltips[9])],
-                [sg.Button('Plot Distribution', tooltip=tooltips[10]), sg.Combo(values=['Time to germination','Max Germination Rate'], default_value='Time to germination', key='plotsel')],
                 [sg.Button('Save Data'), sg.Button('Save Plots')],
                 [sg.Exit()]]
 
@@ -267,10 +267,11 @@ def data_analysis_gui():
             window['sample'].update()
             #Update user selection of which measurement to plot.
             window['trace_var'].update()
-            plot = psp.DataVis(dataframe=table).plot_subset(num_samples=int(values['sample']), key=values['trace_var'])
+            #Update facet groupign to plot either by condition or strain
+            window['facet_row'].update()
+            plot = psp.DataVis(dataframe=table).plot_subset(num_samples=int(values['sample']), key=values['trace_var'], facet_row=values['facet_row'])
             plot.show()
 
-    
         if event == 'Display Table':
             #can get very slow for massive dataframes. 
             win2 = gen_window_2(table)
@@ -283,6 +284,13 @@ def data_analysis_gui():
             #use the built in pandas method to save as .csv
             table.to_csv(outputpath,index=False)
 
+        if event == 'Save Plots':
+            #Need to have another save data button for the other datasets
+            #open up a save dialog. User can select the name and the ouput directory.
+            outputpath = sg.popup_get_file(message = 'Save Path', default_path=values['-FOLDER-'], save_as=True,
+            default_extension='.svg')
+            #use plotly method to save plots
+            plot.write_image(outputpath, engine='orca')
 
     window.close()
 
