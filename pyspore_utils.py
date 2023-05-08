@@ -192,13 +192,13 @@ class Pipeline:
            Returns: black-hat, median filtered, histogram equalized image
            Description:"""
         # Denoise image with median filter
-        denoised = median(img, morph.selem.disk(2))
+        denoised = median(img, morph.disk(2))
 
         # Equalize image histogram to improve contrast
         eq = exposure.equalize_adapthist(denoised)
 
         # apply top-hat transform to image. Need to use a fairly large structuring element for spore coat
-        strel = morph.selem.disk(10)
+        strel = morph.disk(10)
         #openCV top-hat is considerably faster than scikit
         self.top_hat = cv2.morphologyEx(eq, cv2.MORPH_BLACKHAT, strel)
 
@@ -215,7 +215,7 @@ class Pipeline:
             mask = np.uint8(self.top_hat > self.threshold)
 
         # do binary closing 
-        strel = morph.selem.disk(strel_size)
+        strel = morph.disk(strel_size)
         closed = morph.binary_closing(mask, strel)
 
         # Get rid of spore husks and other small junk
