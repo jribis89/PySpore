@@ -11,7 +11,7 @@ This program was developed as part of my Ph.D. and I have since moved on to anot
 
 2)	Download the .zip folder containing code from https://github.com/jribis89/PySpore and extract all files to your desired location. All files must be kept within the same directory.
 
-3)	Launch the anaconda powershell prompt and change the directory to where PySpore is located.
+3)	Launch Powershell or the Anaconda Powershell Prompt and change the directory to where PySpore is located.
 ```Powershell
 cd disk:\directory\PySpore
 ```
@@ -27,9 +27,9 @@ cd disk:\directory\PySpore
 ```
 
 ## Usage
-Launch the main GUI using command prompt. A splash screen will be displayed and a launcher will pop up.
+Launch the main GUI using Powershell or Anaconda Powershell Prompt. Make sure the pyspore_env environment is active and your working directory is the PySpore directory (see step 3 of install above). A splash screen will be displayed and a launcher will pop up.
 ```Powershell
-(pyspore_env) pyspore_gui.py
+(pyspore_env) python "pyspore_gui.py"
 ```
 From the launcher, you can open the image processing GUI. From here you will load images using the browse button. 
 - To optimize thresholding, select a single image and hit the "test segmentation" button. You will be presented with an image with the spore outlines highlighted. If small objects other than spores are highlighted, increase the value, else decrease it. Use small increments of 0.01 and hit test segmentation again until you are satisfied with the results. Test this on a frame in the middle of the movie and the end and adjust accordingly to get good segmentation.
