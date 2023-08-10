@@ -522,7 +522,7 @@ class DataVis:
         #find unique IDs based on group. Will need to add treatment to this if comparing treatments
         unique = self.data.groupby(['Strain','Position','Replicate'])['ID'].apply(np.unique)
         #loop though the multiindex to find the mutliindex and take the number of smaples desired
-        samples = [[index, np.unique(np.random.choice(sample, num_samples))] for index,sample in unique.items()]
+        samples = [[index, np.unique(np.random.choice(sample, num_samples, replace=False))] for index,sample in unique.items()]
         #initialize empy list to concatenate dataframes at the end of the loop
         rand_samps = []
         #Change the dataframe to a multiindexed dataframe to use the samples as 
