@@ -3,7 +3,7 @@
 PySpore is a simple python application to track single bacterial endospore germination and to process and visualize the output. The code functions best in Windows 10/11. Usage on mac will result in GUIs that do not scale properly for displays of different sizes. A demo movie showing how to use the app and example data can be found [here](https://www.dropbox.com/sh/uolszoie5hjx8mo/AACPZUDvA2R86PbXEnpSWsDda?dl=0).
 
 ## Project Status
-This program was developed as part of my Ph.D. and I have since moved on to another  position, leaving me with limited opportunities to develop PySpore further. I have tried to make the underlying source modular for this to be integrated into projects as needed.
+This program was developed as part of my Ph.D. and I have since moved on to another  position, leaving me with limited opportunities to develop PySpore further. With that said, I will do my best to address minor bugs as they arise.
 
 ## Installation
 
@@ -44,6 +44,9 @@ The Data Explorer GUI is aimed to provide a quick means for the user to join and
 - When working with 2 or more datasets, you will need to click "process data" and apply the filters. This will join the datasets and apply unique identifiers to each spore tracked in the dataset. If unique IDs are not assigned for each spore, the joined datasets will not plot correctly.
 -To save the filtered/joined data just click "Save Data"
 - For an example of more complex analysis of the output refer to the included [Jupyter Notebook](https://github.com/jribis89/PySpore/blob/main/2022_Ribis_etal_calcium_manuscript.ipynb). It includes examples of data smoothing, germination rate calculation, plotting, etc... The data output is a .csv, so more complex analysis is easily done in statistical software including R, GraphPad Prism, and Microsoft Excel.
+
+## Support
+I will do my best to answer questions related to the protocol and software in a timely manner. Please email pyspore@gmail.com.
 
 ## License
 
