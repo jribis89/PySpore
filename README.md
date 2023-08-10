@@ -1,6 +1,6 @@
 # PySpore
 
-PySpore is a simple python application to track single bacterial endospore germination and to process and visualize the output. The code functions best in Windows 10/11. Usage on mac will result in GUIs that do not scale properly for displays of different sizes. A demo movie showing how to use the app and example data can be found [here] (https://www.dropbox.com/sh/uolszoie5hjx8mo/AACPZUDvA2R86PbXEnpSWsDda?dl=0).
+PySpore is a simple python application to track single bacterial endospore germination and to process and visualize the output. The code functions best in Windows 10/11. Usage on mac will result in GUIs that do not scale properly for displays of different sizes. A demo movie showing how to use the app and example data can be found [here](https://www.dropbox.com/sh/uolszoie5hjx8mo/AACPZUDvA2R86PbXEnpSWsDda?dl=0).
 
 ## Project Status
 This program was developed as part of my Ph.D. and I have since moved on to another  position, leaving me with limited opportunities to develop PySpore further. I have tried to make the underlying source modular for this to be integrated into projects as needed.
